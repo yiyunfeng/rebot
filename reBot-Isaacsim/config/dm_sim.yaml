@@ -1,0 +1,93 @@
+asset:
+  source_mjcf: assets/DM-rebot-dev-arm/source/reBot-DevArm_gripper.xml
+  usd_path: usd/DM-rebot-dev-arm/rebotarm_dm.usd
+  scene_usd_path: usd/DM-rebot-dev-arm/rebotarm_dm_with_camera.usd
+  robot_prim_path: /World/base_link
+
+simulation:
+  physics_hz: 400
+  rendering_hz: 60
+  solver_type: TGS
+  solver_position_iterations: 32
+  solver_velocity_iterations: 4
+  enable_stabilization: true
+  enable_ccd: true
+
+network:
+  host: 127.0.0.1
+  port: 5005
+  send_hz: 60
+
+hardware_mirror:
+  position_alpha: 0.2
+  joint_direction: [-1.0, 1.0, 1.0, 1.0, -1.0, -1.0]
+  # Real gripper motor: close=0 rad, open=-5 rad; simulated slide: 0~0.05 m.
+  gripper_position_scale: 0.01
+  gravity_tau_scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+  gravity_kp: 1.5
+  gravity_kd: 1.0
+
+sim2real:
+  # 与 rebot_grasp/config/default.yaml 的 robot.ready_pose 对齐：
+  # xyz=[0.2, 0.0, 0.2]m, rpy=[0.0, 0.7, 0.0]rad。
+  # ready_arm 是使用同一 DM URDF 离线 IK 后经 FK 回验的关节解。
+  ready_arm: [-0.00000847, -0.44618440, -0.71451218, 0.96833512, -0.00000885, 0.00009368]
+  ready_duration_s: 3.0
+  camera_view_gripper_m: 0.00
+  # 抓取后不再回到当前识别到的香蕉位置放置，而是放到固定桌面点。
+  # 该点位于前几轮日志中 IK 可成功的桌面区域，z 为香蕉中心接近桌面时的高度。
+  place_position: [0.40, 0.00, 0.021]
+
+scene:
+  ground_z: -0.04
+  table:
+    position: [0.25, 0.0, -0.02]
+    size: [0.90, 0.70, 0.04]
+  object:
+    asset_path: assets/banana/bananas_1k.usdc
+    source_prim_path: /bananas/bananas_a
+    # 源单香蕉 mesh 带少量局部偏移；该平移使几何中心约位于桌面 (0.32, 0)。
+    position: [0.40, 0.0, 0.019]
+    rotation_deg: [0.0, 0.0, 0.0]
+    scale: [1.0, 1.0, 1.0]
+    mass: 0.12
+    collision_approximation: convexDecomposition
+
+initial_state:
+  arm: [0.0, -0.05, -0.05, 0.0, 0.0, 0.0]
+  gripper_m: 0.0
+
+arm:
+  joints:
+    joint1: {lower: -2.80, upper: 2.80, stiffness: 800.0, damping: 6.0, max_force: 27.0, max_velocity: 1.0}
+    joint2: {lower: -3.14, upper: 0.00, stiffness: 800.0, damping: 6.0, max_force: 27.0, max_velocity: 1.0}
+    joint3: {lower: -3.14, upper: 0.00, stiffness: 800.0, damping: 6.0, max_force: 27.0, max_velocity: 1.0}
+    joint4: {lower: -1.87, upper: 1.57, stiffness: 600.0, damping: 2.0, max_force: 7.0, max_velocity: 1.0}
+    joint5: {lower: -1.57, upper: 1.57, stiffness: 600.0, damping: 2.0, max_force: 7.0, max_velocity: 1.0}
+    joint6: {lower: -3.14, upper: 3.14, stiffness: 600.0, damping: 2.0, max_force: 7.0, max_velocity: 1.0}
+
+gripper:
+  joints: [left_finger, right_finger]
+  collision_prim_paths:
+    - /World/base_link/left_finger_link/collisions
+    - /World/base_link/right_finger_link/collisions
+  lower_limit_m: 0.0
+  upper_limit_m: 0.051
+  command_min_m: 0.001
+  # command_max_m: 0.050
+  command_max_m: 0.030
+  grasp_success_min_block_m: 0.003
+  grasp_success_min_effort: 0.2
+  grasp_success_min_lift_m: 0.015
+  stiffness: 2000.0
+  # MuJoCo actuator kv=124 plus passive joint damping=50.
+  damping: 174.0
+  armature: 0.243
+  joint_friction: 1.0
+  max_force: 50.0
+  max_velocity: 0.2
+
+materials:
+  fingertip: {static_friction: 1.5, dynamic_friction: 1.5, restitution: 0.0}
+  object: {static_friction: 1.8, dynamic_friction: 1.8, restitution: 0.0}
+  table: {static_friction: 1.0, dynamic_friction: 1.0, restitution: 0.0}

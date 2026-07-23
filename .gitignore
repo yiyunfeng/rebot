@@ -1,0 +1,75 @@
+# Local Git metadata from the aggregated source directories
+.git/
+**/.git/
+
+# Editor and agent-local state
+.agents/
+.codex/
+**/.claude/
+**/.vscode/
+**/.idea/
+
+# Python caches and packaging outputs
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/*.egg-info/
+**/dist/
+
+# Virtual environments
+**/.venv/
+**/.venv.*/
+**/venv/
+**/env/
+
+# ROS and native build outputs
+**/build/
+**/install/
+**/log/
+**/logs/
+**/Log/
+**/CMakeFiles/
+**/CMakeCache.txt
+
+# IDE indexes, runtime dumps, and temporary files
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.tmp
+**/*.bak
+**/*.tmp.usd
+**/*.bak.usd
+**/MJDATA.TXT
+**/MJMODEL.TXT
+
+# Local backups and archives
+backups/
+**/backups/
+question/
+**/*.tar
+**/*.tar.gz
+**/*.zip
+
+# Training samples, checkpoints, and generated reports
+lerobot/datasets/
+lerobot/outputs/
+reBot-IsaacLab/data/
+reBot-IsaacLab/exported/
+reBot-IsaacLab/reports/
+reBot-IsaacLab/results/
+**/checkpoints/
+**/*.safetensors
+**/*.pt
+**/*.pth
+**/*.onnx
+**/*.ts
+
+# Downloaded model and SDK worktrees
+rebot_grasp/models/
+rebot_grasp/sdk/
+
+# Calibration/runtime captures and local logs
+**/*.npz
+**/*voice*
+**/*.log

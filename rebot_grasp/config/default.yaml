@@ -1,0 +1,124 @@
+camera:
+  type: orbbec_dabai_dcw
+  serial: null
+  model: "Orbbec DaBai DCW"
+  # DaBai DCW 通过 pyorbbecsdk 运行；内参、畸变和深度比例在启动时
+  # 从相机工厂标定读取，不要在抓取代码里硬编码 K/D。
+  color_width: 640
+  color_height: 360
+  depth_width: 640
+  depth_height: 360
+  # 当前 DaBai DCW USB2 实测：640x360@30fps 有效 RGB-D 帧比例最高。
+  fps: 30
+
+calibration:
+  aruco:
+    marker_length_m: 0.100
+    dict_id: 0
+    target_marker_id: 0
+  hand_eye_method: PARK
+  hand_eye_compensation_m:
+    x: 0.00
+    y: 0.0
+    z: -0.0
+
+detection:
+  conf_threshold: 0.5
+  iou_threshold: 0.45
+
+perception:
+  # 真机视觉后端全局开关：
+  #   obb      : YOLO/YOLO-OBB + 深度，速度最快，适合规则桌面物体。
+  #   sam      : YOLO 检测框 + SAM 精分割 + 深度，边界更准但更慢。
+  #   graspnet : RGB-D 点云 + GraspNet 6D 抓取候选，姿态更完整，依赖 CUDA 扩展。
+  backend: "sam"
+
+robot:
+  repo_root: null
+  # 机械臂自身执行误差补偿，作用在机器人 base 坐标系，单位米。
+  # 只在最终发给真机的 grasp/pregrasp/retreat 位姿上平移，
+  # 不参与相机内参、手眼标定和视觉检测。
+  # 填写规则：补偿 = 期望目标 - 实际到达。
+  # 通过测量所得
+  # 真机实际 x 比输入更近 1cm，x=+0.010。
+  # y 采用左右对称补偿：两边真机都比输入更靠近 y=0 约 0.020m，也就是 2cm。
+  execution_compensation_base_m:
+    x: 0.010
+    y: 0.0
+    # z: 0.0435
+    z: 0.0235
+  # 位置相关 z 补偿，只和目标 x 有关，单位都是米。
+  # 最终 z 修正量 = execution_compensation_base_m.z + slope * (target_x - reference_x)。
+  # slope 的计算方式：如果两个点的 z 补偿分别是 c1/c2，
+  # slope = (c2 - c1) / (x2 - x1)。
+  execution_compensation_z_by_x:
+    enabled: true
+    reference_x: 0.30
+    slope: 0.13
+  # y 方向对称补偿：如果真机左右两侧都比输入更靠近 y=0，
+  # 就按目标 y 的正负把目标点往外推。
+  # y > deadband: y += offset；y < -deadband: y -= offset；中心附近不补。
+  execution_compensation_y_radial:
+    enabled: true
+    deadband: 0.005
+    offset: 0.020
+  gripper:
+    dm:
+      angle_open: 5.0
+      counterclockwise: true
+      tau_max: 1.5
+      close_torque: 0.6
+      default_force: 0.2
+  ready_pose:
+    x: 0.2
+    y: 0.0
+    z: 0.2
+    roll: 0.0
+    pitch: 0.7
+    duration: 3.0
+
+yolo:
+  model_name: "yoloe-26l-seg.pt"
+  device: "cuda:0"
+  use_world: true
+  custom_classes:
+    - "yellow banana"
+    - "water bottle"
+    - "light blue coffee cup"
+    - "cup"
+    - "green object"
+    - "tool"
+
+sam:
+  # perception.backend=sam 时主抓取程序会自动启用 SAM。
+  # 普通脚本仍可直接读取 enabled，因此这里默认 false，避免 OBB 模式误加载重模型。
+  enabled: false
+  model_name: "sam_b.pt"
+  device: "cuda:0"
+  conf_threshold: 0.01
+
+grasp_pipeline:
+  infer_every_live: 3
+  grasp:
+    depth_quantile: 0.5
+    pregrasp_offset_m: 0.080
+    insertion_depth_m: 0.015
+    min_base_z_m: 0.00
+
+graspnet:
+  checkpoint: "checkpoint-rs.tar"
+  num_view: 300
+  num_point: 20000
+  collision_thresh: 0.01
+  voxel_size: 0.01
+  min_depth: 0.05
+  max_depth: 1.0
+  top_k: 50
+  target_class: null
+  target_margin_px: 12
+  target_expand_ratio: 1.35
+  # true 时先用 YOLO 选目标，再只保留目标框附近的 GraspNet 抓取候选；
+  # false 时做全场景抓取，适合先确认 GraspNet 本身能否跑通。
+  use_yolo_filter: true
+  # 夹爪最大开口，超过该宽度的 GraspNet 候选会被过滤。
+  max_grasp_width_m: 0.065

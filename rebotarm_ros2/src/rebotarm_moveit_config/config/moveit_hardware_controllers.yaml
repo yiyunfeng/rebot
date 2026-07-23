@@ -1,0 +1,43 @@
+# ============================================================
+# MoveIt 轨迹执行 & 控制器管理配置（真机 hardware 模式）
+# ============================================================
+
+# ---- 轨迹执行参数 ----
+# 控制轨迹执行管理器如何验证和执行轨迹
+trajectory_execution:
+  # 执行时长缩放因子，实际超时 = 轨迹时长 × 该值
+  allowed_execution_duration_scaling: 1.2
+  # 到达目标点的额外时间裕度 (s)，避免因轻微超时被判定失败
+  allowed_goal_duration_margin: 0.5
+  # 轨迹起点与当前关节状态的允许偏差 (rad)
+  # 0.05 rad ≈ 2.86°，真机如果频繁触发 "deviates more than" 错误可适当增大
+  allowed_start_tolerance: 0.05
+  # 开启执行时长监控，超时则中止轨迹
+  execution_duration_monitoring: true
+
+# ---- 控制器管理器类型 ----
+# 使用 simple controller manager，通过 Action 接口与底层控制器通信
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+# ---- 控制器列表 & 关节映射 ----
+moveit_simple_controller_manager:
+  # 可用控制器名称列表
+  controller_names:
+    - rebotarm
+
+  # rebotarm 控制器配置
+  rebotarm:
+    # FollowJointTrajectory action 的命名空间
+    action_ns: follow_joint_trajectory
+    # 控制器 Action 类型
+    type: FollowJointTrajectory
+    # 标记为默认控制器
+    default: true
+    # 控制器按顺序管理的关节列表
+    joints:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
+      - joint6

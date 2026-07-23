@@ -1,0 +1,40 @@
+# ROS 2 hardware selection and SDK override config.
+#
+# sdk_config is loaded from third_party/reBotArm_control_py/config, then the
+# selected DM model's overrides are deep-merged on top. Launch parameter channel
+# has highest priority.
+
+default_model: dm
+
+models:
+  dm:
+    sdk_config: rebotarm_dm.yaml
+    overrides:
+      name: reBotArm-B601-DM
+      urdf_path: urdf/reBot-DevArm_fixend_description/urdf/reBot-DevArm_fixend.urdf
+      end_effector_frame: end_link
+      pose_compensation:
+        enabled: true
+        # z_offset: 0.045  # move_to_pose 补上补偿，让机械臂能够和 IK 相同
+        z_offset: 0.0     
+        min_user_z: 0.005     # 用户输入的 move_to_pose z 最低不低于 5mm
+        min_command_z: 0.005  # 补偿后发送给 SDK 的 z 最低不低于 5mm
+
+      channel: /dev/ttyACM0
+      rate: 500
+      groups:
+        arm:
+          joints: [joint1, joint2, joint3, joint4, joint5, joint6]
+        gripper:
+          joints: [gripper]
+      gripper:
+        position_limits:
+          open: -5.0
+          close: 0.0
+      control:
+        arm_control_mode: posvel
+        mit_kp: [120.0, 120.0, 120.0, 18.0, 18.0, 18.0]
+        mit_kd: [8.0, 8.0, 8.0, 2.0, 2.0, 2.0]
+      gravity_compensation:
+        kp: 2.0
+        kd: 1.5

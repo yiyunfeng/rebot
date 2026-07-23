@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+from rebotarm_gazebo11.gripper_slider_gui import main
+
+if __name__ == "__main__":
+    main()

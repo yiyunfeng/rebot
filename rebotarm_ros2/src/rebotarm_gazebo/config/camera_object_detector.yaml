@@ -1,0 +1,21 @@
+# Gazebo 仿真相机目标检测配置。
+# 仿真只检测桌面绿色方块，固定使用 HSV，避免 AI 模型依赖污染 ROS 环境。
+# 真机视觉流程保持在 rebot_grasp / hardware 相关脚本中，不使用本配置切换。
+camera_object_detector:
+  ros__parameters:
+    detector_backend: hsv
+    fallback_to_hsv: false
+
+    # 仿真目标固定为绿色方块，类别名不参与 HSV 检测。
+    target_class: ""
+    confidence_threshold: 0.25
+
+    # HSV 依赖少、帧率稳定，仿真每帧都可检测。
+    inference_stride: 1
+
+    # HSV 阈值检测 Gazebo 桌面绿色方块。
+    hsv_lower: [35, 40, 40]
+    hsv_upper: [90, 255, 255]
+    min_area: 500.0
+    min_depth: 0.05
+    max_depth: 2.0

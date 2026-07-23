@@ -1,0 +1,24 @@
+joint_pose_commander:
+  ros__parameters:
+    # 默认观察姿态：相机朝向桌面，适合先看清桌面物体再做视觉检测。
+    # 数值来自当前能看到桌面的 /joint_states，单位是 rad。
+    pose_name: table_view
+    joint_names:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
+      - joint6
+    table_view:
+      # 由 rebot_grasp/config/default.yaml 的 robot.ready_pose 通过 SDK IK 计算：
+      # xyz=(0.2, 0.0, 0.2), rpy=(0.0, 0.7, 0.0)。
+      - -0.000008471476579846539
+      - -0.4461844044184786
+      - -0.7145121819725873
+      - 0.9683351239279774
+      - -0.0000088456631542515
+      - 0.0000936786770889346
+
+    command_action: /rebotarm_controller/follow_joint_trajectory
+    move_duration: 3.0

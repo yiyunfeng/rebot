@@ -1,0 +1,43 @@
+mujoco_sim_node:
+  ros__parameters:
+    # MuJoCo Python 包由 pip 安装，不属于 ROS 依赖。
+    # 安装到当前运行 ros2 的 Python 环境：
+    #   python3 -m pip install --user "mujoco==3.2.7"
+    model_path: ""
+    publish_rate: 50.0
+    step_hz: 500.0
+    # 控制目标更新频率。物理仍按 step_hz 积分；这里降低 Python/GUI 更新频率，
+    # 可以让轨迹执行更顺，同时保留接触仿真的细步长。
+    control_rate: 100.0
+    # MoveIt 生成的轨迹时间通常偏保守，MuJoCo 仿真可适当压缩执行时间。
+    # 0.45 表示按原轨迹 45% 的时间播放；如仍慢可降到 0.3。
+    trajectory_time_scale: 0.45
+    # action 结束前等待 MuJoCo qpos 真正接近目标，避免 MoveIt 以为到位、
+    # 但 /joint_states 还没到位造成后续规划和 RViz goal state 不同步。
+    goal_tolerance: 0.003
+    settle_timeout: 1.5
+    # true 时启动 MuJoCo GUI。GUI 与 MoveIt 控制共用同一份 model/data，
+    # 因此 MoveIt 执行轨迹时，MuJoCo 窗口会同步显示机械臂运动。
+    use_viewer: true
+    arm_action_name: /rebotarm_controller/follow_joint_trajectory
+    gripper_action_name: /gripper_controller/follow_joint_trajectory
+    arm_joint_names:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
+      - joint6
+    gripper_joint_names:
+      - gripper_joint1
+      - gripper_joint2
+    # 初始姿态尽量接近项目现有 home，避免 MoveIt 起始状态越界。
+    home_positions:
+      - 0.0
+      - -0.05
+      - -0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0

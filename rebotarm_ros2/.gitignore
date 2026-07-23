@@ -1,0 +1,24 @@
+# ── 编译产物 ──
+build/
+install/
+log/
+*.pyc
+*.pyo
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
+# ── IDE 配置（仅本地） ──
+.vscode/
+.idea/
+.codex/
+
+# ── Claude Code 本地文件 ──
+.claude/
+
+# ── 三方库 ──
+third_party/
+
+# ── 杂项 ──
+info
+*.db

@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+from rebotarm_gazebo11.trajectory_relay import main
+
+if __name__ == "__main__":
+    main()

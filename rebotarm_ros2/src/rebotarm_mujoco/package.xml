@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rebotarm_mujoco</name>
+  <version>0.1.0</version>
+  <description>reBot Arm B601 DM MuJoCo simulation with MoveIt 2 integration.</description>
+  <maintainer email="yyf@example.com">yyf</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>moveit_configs_utils</exec_depend>
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>xacro</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

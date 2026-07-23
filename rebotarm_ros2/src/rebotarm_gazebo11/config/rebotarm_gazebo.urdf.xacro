@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="reBot_B601_DM_with_gripper">
+  <xacro:arg name="initial_positions_file"
+    default="$(find rebotarm_gazebo11)/config/initial_positions.yaml" />
+  <xacro:arg name="controller_config"
+    default="$(find rebotarm_gazebo11)/config/gazebo_controllers.yaml" />
+
+  <xacro:include filename="$(find rebotarm_gazebo11)/config/reBot_B601_DM_with_gripper_gazebo.urdf" />
+  <xacro:include filename="$(find rebotarm_gazebo11)/config/rebotarm.ros2_control.xacro" />
+
+  <!-- Keep the gripper base link in Gazebo instead of lumping it into link6.
+       This preserves the local frames used by the two prismatic finger joints. -->
+  <gazebo reference="gripper_joint">
+    <preserveFixedJoint>true</preserveFixedJoint>
+  </gazebo>
+
+  <link name="gripper_tcp" />
+  <joint name="gripper_tcp_joint" type="fixed">
+    <origin xyz="-0.025 0 0" rpy="0 0 0" />
+    <parent link="gripper_link" />
+    <child link="gripper_tcp" />
+  </joint>
+
+  <!-- <link name="gripper_tcp"/>
+  <joint name="gripper_tcp_joint" type="fixed">
+    <origin xyz="-0.0443 0 0" rpy="0 0 0"/>
+    <parent link="gripper_link"/>
+    <child link="gripper_tcp"/>
+  </joint> -->
+
+  <xacro:rebotarm_ros2_control name="RebotArmGazeboSystem"
+    initial_positions_file="$(arg initial_positions_file)" />
+
+  <gazebo>
+    <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+      <parameters>$(arg controller_config)</parameters>
+    </plugin>
+    <plugin name="gazebo_grasp_fix" filename="libgazebo_grasp_fix.so">
+      <arm>
+        <arm_name>rebotarm_gripper</arm_name>
+        <palm_link>gripper_link</palm_link>
+        <gripper_link>gripper_left</gripper_link>
+        <gripper_link>gripper_right</gripper_link>
+      </arm>
+      <forces_angle_tolerance>100</forces_angle_tolerance>
+      <update_rate>50</update_rate>
+      <grasp_object_substring>green_cube</grasp_object_substring>
+      <grip_count_threshold>1</grip_count_threshold>
+      <max_grip_count>50</max_grip_count>
+      <release_tolerance>0.005</release_tolerance>
+      <disable_collisions_on_attach>true</disable_collisions_on_attach>
+      <contact_topic>__default_topic__</contact_topic>
+    </plugin>
+  </gazebo>
+</robot>

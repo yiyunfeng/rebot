@@ -1,0 +1,52 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="arm_and_table">
+    <physics name="smooth_physics" type="ignored">
+      <max_step_size>0.0025</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin
+      filename="ignition-gazebo-physics-system"
+      name="gz::sim::systems::Physics">
+    </plugin>
+    <plugin
+      filename="ignition-gazebo-user-commands-system"
+      name="gz::sim::systems::UserCommands">
+    </plugin>
+    <plugin
+      filename="ignition-gazebo-sensors-system"
+      name="gz::sim::systems::Sensors">
+      <render_engine>ogre</render_engine>
+    </plugin>
+    <plugin
+      filename="ignition-gazebo-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster">
+    </plugin>
+
+    <scene>
+      <shadows>0</shadows>
+    </scene>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- 静态场景模型由 world 直接组合。机械臂和方块随后作为独立动态模型生成。 -->
+    <include>
+      <uri>model://table</uri>
+      <name>table</name>
+      <pose>0.28 0 0 0 0 1.5708</pose>
+    </include>
+
+    <!-- 视觉抓取目标方块由 camera_grasp_sim 在机械臂生成后动态创建。
+         不能在 world 中预埋 DetachableJoint 方块，否则插件初始化时
+         child_model=rebotarm 可能还不存在，吸附会不稳定。 -->
+
+    <include>
+      <uri>model://ground_plane</uri>
+      <name>ground_plane</name>
+    </include>
+
+  </world>
+</sdf>

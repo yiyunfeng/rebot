@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="reBot_B601_DM_with_gripper">
+  <!--
+    MuJoCo 的 RViz/MoveIt 模型必须和 Gazebo/真机模型同源。
+
+    这里复用 rebotarm_gazebo 中由 SolidWorks 导出的 DM 机械臂 + 夹爪 URDF，
+    保证 link、joint、mesh、视觉外观和 MoveIt 规划链路与 Gazebo 一致。
+
+    不直接 include rebotarm_gazebo.urdf.xacro 的原因：
+      1. 那个文件额外加入了 gz_ros2_control 插件；
+      2. MuJoCo 由 mujoco_sim_node.py 提供 FollowJointTrajectory action；
+      3. 这里不需要 Gazebo 插件和 ros2_control 硬件描述。
+  -->
+  <xacro:include filename="$(find rebotarm_gazebo)/config/reBot_B601_DM_with_gripper_gazebo.urdf" />
+
+  <!--
+    TCP 与 Gazebo 配置保持一致，MoveIt 的 arm group 以 gripper_tcp 为末端。
+    如果真实夹爪 TCP 需要标定，应同步修改 Gazebo/MuJoCo/硬件 MoveIt 配置。
+  -->
+  <link name="gripper_tcp" />
+  <joint name="gripper_tcp_joint" type="fixed">
+    <origin xyz="0.032 0 0" rpy="0 0 0" />
+    <parent link="gripper_link" />
+    <child link="gripper_tcp" />
+  </joint>
+</robot>

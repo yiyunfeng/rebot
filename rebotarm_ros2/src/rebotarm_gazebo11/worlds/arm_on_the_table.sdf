@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="arm_and_table">
+    <scene>
+      <shadows>0</shadows>
+    </scene>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <model name="table">
+      <static>true</static>
+      <include>
+        <uri>model://table</uri>
+      </include>
+      <pose>0.28 0 0 0 0 1.5708</pose>
+    </model>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <include>
+        <uri>model://ground_plane</uri>
+      </include>
+    </model>
+
+  </world>
+</sdf>

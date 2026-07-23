@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<sdf xmlns:xacro="http://www.ros.org/wiki/xacro" version="1.7">
+  <xacro:arg name="name" default="green_cube" />
+  <xacro:arg name="size" default="0.05" />
+  <xacro:arg name="mass" default="0.05" />
+  <xacro:arg name="inertia" default="0.0000208333" />
+
+  <model name="$(arg name)">
+    <static>false</static>
+    <link name="link">
+      <inertial>
+        <mass>$(arg mass)</mass>
+        <inertia>
+          <ixx>$(arg inertia)</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>$(arg inertia)</iyy>
+          <iyz>0</iyz>
+          <izz>$(arg inertia)</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <box><size>$(arg size) $(arg size) $(arg size)</size></box>
+        </geometry>
+        <material>
+          <ambient>0 0.8 0 1</ambient>
+          <diffuse>0 0.8 0 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <box><size>$(arg size) $(arg size) $(arg size)</size></box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode><mu>1.5</mu><mu2>0.3</mu2></ode>
+          </friction>
+          <contact>
+            <ode>
+              <kp>1e5</kp>
+              <kd>100</kd>
+              <max_vel>0.2</max_vel>
+              <min_depth>0.001</min_depth>
+            </ode>
+          </contact>
+        </surface>
+      </collision>
+    </link>
+
+    <plugin filename="ignition-gazebo-detachable-joint-system"
+            name="gz::sim::systems::DetachableJoint">
+      <parent_link>link</parent_link>
+      <child_model>rebotarm</child_model>
+      <child_link>gripper_link</child_link>
+      <attach_topic>/$(arg name)/attach</attach_topic>
+      <detach_topic>/$(arg name)/detach</detach_topic>
+      <output_topic>/$(arg name)/state</output_topic>
+    </plugin>
+  </model>
+</sdf>

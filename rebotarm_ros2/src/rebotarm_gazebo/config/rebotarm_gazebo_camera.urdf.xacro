@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="reBot_B601_DM_with_gripper">
+  <!-- 基础机械臂已经包含夹爪、TCP、可选 world 固定关节和可选 ros2_control。 -->
+  <xacro:include filename="$(find rebotarm_gazebo)/config/rebotarm_gazebo.urdf.xacro" />
+  <xacro:include filename="$(find orbbec_description)/urdf/astra2.urdf.xacro" />
+
+  <link name="dabai_camera_link" />
+  <joint name="dabai_camera_mount_joint" type="fixed">
+    <origin xyz="-0.092323996052145958 -0.03750000149011612 -0.055150320053100586" rpy="3.14 0 0" />
+    <parent link="gripper_link" />
+    <child link="dabai_camera_link" />
+  </joint>
+
+  <joint name="dabai_camera_body_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="dabai_camera_link" />
+    <child link="camera_link" />
+  </joint>
+
+  <link name="dabai_camera_optical_frame" />
+  <joint name="dabai_camera_optical_joint" type="fixed">
+    <parent link="dabai_camera_link" />
+    <child link="dabai_camera_optical_frame" />
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708" />
+  </joint>
+
+  <gazebo reference="dabai_camera_link">
+    <sensor type="rgbd_camera" name="dabai_camera">
+      <topic>dabai_camera</topic>
+      <update_rate>30</update_rate>
+      <visualize>true</visualize>
+      <camera name="dabai_camera">
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>640</width>
+          <height>360</height>
+        </image>
+        <clip>
+          <near>0.05</near>
+          <far>5.0</far>
+        </clip>
+      </camera>
+    </sensor>
+  </gazebo>
+</robot>

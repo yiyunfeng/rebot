@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="reBot_B601_DM_with_gripper">
+  <xacro:arg name="initial_positions_file"
+    default="$(find rebotarm_gazebo)/config/initial_positions.yaml" />
+  <xacro:arg name="controller_config"
+    default="$(find rebotarm_gazebo)/config/gazebo_controllers.yaml" />
+  <xacro:arg name="load_ros2_control" default="false" />
+  <xacro:arg name="gazebo_world_fixed" default="false" />
+
+  <xacro:include filename="$(find rebotarm_gazebo)/config/reBot_B601_DM_with_gripper_gazebo.urdf" />
+  <xacro:if value="$(arg load_ros2_control)">
+    <xacro:include filename="$(find rebotarm_gazebo)/config/rebotarm.ros2_control.xacro" />
+  </xacro:if>
+
+  <!-- 只在生成 Gazebo 模型时固定底座；MoveIt 继续使用 base_link 作为根 link。 -->
+  <xacro:if value="$(arg gazebo_world_fixed)">
+    <link name="world" />
+    <joint name="world_fixed" type="fixed">
+      <parent link="world" />
+      <child link="base_link" />
+    </joint>
+  </xacro:if>
+
+  <!-- Keep the gripper base link in Gazebo instead of lumping it into link6.
+       This preserves the local frames used by the two prismatic finger joints. -->
+  <gazebo reference="gripper_joint">
+    <preserveFixedJoint>true</preserveFixedJoint>
+  </gazebo>
+
+  <link name="gripper_tcp" />
+  <joint name="gripper_tcp_joint" type="fixed">
+    <origin xyz="0.032 0 0" rpy="0 0 0" />
+    <parent link="gripper_link" />
+    <child link="gripper_tcp" />
+  </joint>
+
+
+  <xacro:if value="$(arg load_ros2_control)">
+    <xacro:rebotarm_ros2_control name="RebotArmGazeboSystem"
+      initial_positions_file="$(arg initial_positions_file)" />
+
+    <gazebo>
+      <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(arg controller_config)</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+</robot>

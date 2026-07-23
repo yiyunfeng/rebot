@@ -1,0 +1,84 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.35
+      Cell Size: 0.1
+      Class: rviz_default_plugins/Grid
+      Color: 120; 120; 120
+      Enabled: true
+      Name: Workspace Grid
+      Plane: XY
+      Plane Cell Count: 8
+      Reference Frame: <Fixed Frame>
+    - Class: moveit_rviz_plugin/RobotState
+      Enabled: true
+      Name: Current Robot
+      Robot Description: robot_description
+      State Display Time: 0.05 s
+    - Class: moveit_rviz_plugin/PlanningScene
+      Enabled: true
+      Move Group Namespace: ""
+      Name: Planning Scene
+      Planning Scene Topic: /monitored_planning_scene
+      Robot Description: robot_description
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: false
+        camera_color_optical_frame:
+          Value: true
+        gripper_tcp:
+          Value: true
+      Marker Scale: 0.12
+      Name: TCP And Camera Frames
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+    - Acceleration_Scaling_Factor: 0.2
+      Class: moveit_rviz_plugin/MotionPlanning
+      Enabled: true
+      Move Group Namespace: ""
+      MoveIt_Planning_Attempts: 10
+      MoveIt_Planning_Time: 5
+      Name: MoveIt Planning
+      Planning Request:
+        Planning Group: arm
+        Query Goal State: true
+        Query Start State: false
+      Planning Scene Topic: /monitored_planning_scene
+      Robot Description: robot_description
+      Velocity_Scaling_Factor: 0.2
+  Enabled: true
+  Global Options:
+    Background Color: 42; 42; 42
+    Fixed Frame: world
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 1.4
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0.18
+      Name: MoveIt View
+      Pitch: 0.65
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+      Yaw: 5.7
+    Saved: ~
+Window Geometry:
+  Height: 900
+  Width: 1280

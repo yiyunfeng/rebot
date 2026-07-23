@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=71"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lerobot_robot_rebot"
+version = "0.1.0"
+description = "reBot Arm B601 的轻量 LeRobot 集成"
+requires-python = ">=3.10,<3.12"
+dependencies = [
+    "lerobot==0.4.4",
+    "numpy>=1.24,<3",
+    "opencv-python-headless>=4.9,<4.13",
+    "Pillow>=10,<13",
+    "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+rebot-record = "lerobot_robot_rebot.scripts.record:main"
+rebot-check-dataset = "lerobot_robot_rebot.scripts.check_dataset:main"
+rebot-train = "lerobot_robot_rebot.scripts.train:main"
+rebot-download-models = "lerobot_robot_rebot.scripts.download_models:main"
+rebot-deploy = "lerobot_robot_rebot.scripts.deploy:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

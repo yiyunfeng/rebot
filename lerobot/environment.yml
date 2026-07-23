@@ -1,0 +1,6 @@
+name: rebot_lerobot
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10.20
+  - pip

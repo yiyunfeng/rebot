@@ -1,0 +1,21 @@
+#usda 1.0
+(
+    defaultPrim = "Robot"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+# Isaac Lab 会把这个 default prim 复制到每个并行环境的 /Robot 下。
+# 必须引用完整 /World：ArticulationRootAPI 和指尖 PhysicsMaterial 都位于
+# base_link 的父级。只引用 /World/base_link 会丢失这两部分。
+def Xform "Robot" (
+    prepend references = @../../reBot-Isaacsim/usd/DM-rebot-dev-arm/rebotarm_dm_with_camera.usd@
+)
+{
+    # 训练场景使用 Isaac Lab 自己的灯光，不复制原 USD 的环境灯。
+    over "Environment" (
+        active = false
+    )
+    {
+    }
+}

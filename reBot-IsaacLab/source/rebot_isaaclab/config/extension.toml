@@ -1,0 +1,20 @@
+# Isaac Sim/Kit 扩展元数据；Python 安装信息另见 source/rebot_isaaclab/setup.py。
+[package]
+version = "0.1.0"
+title = "reBot Isaac Lab Tasks"
+description = "Domain-randomized banana grasping tasks for reBot Arm B601."
+category = "robotics"
+keywords = ["robotics", "grasping", "sim2real", "reinforcement-learning"]
+
+# 声明运行时依赖的 Kit 扩展，加载本扩展前由 Kit 负责解析。
+[dependencies]
+"isaaclab" = {}
+"isaaclab_tasks" = {}
+
+# 任务注册不支持运行中热重载，避免重复执行 gym.register。
+[core]
+reloadable = false
+
+# Kit 加载扩展时导入该模块，从而注册 reBot 香蕉任务。
+[[python.module]]
+name = "rebot_isaaclab.tasks"

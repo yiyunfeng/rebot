@@ -1,0 +1,106 @@
+#usda 1.0
+(
+    defaultPrim = "Banana"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+# 外观和碰撞都使用 Isaac Sim 抓取阶段已经验证的原香蕉模型。
+# wrapper 只补充刚体、质量、摩擦和 convexDecomposition 物理属性。
+def Xform "Banana" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+)
+{
+    bool physics:rigidBodyEnabled = 1
+    float physics:mass = 0.12
+
+    def Xform "Visual" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        prepend references = @../../reBot-Isaacsim/assets/banana/bananas_1k.usdc@</bananas/bananas_a>
+    )
+    {
+        # 直接在引用根节点绑定黄色材质，避免源 USD 内部 mesh 名称变化时只看到灰色模型。
+        rel material:binding = </Banana/YellowMaterial>
+
+        over "mesh_009" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            bool physics:collisionEnabled = 1
+            uniform token physics:approximation = "convexDecomposition"
+            float physxCollision:contactOffset = 0.002
+            rel material:binding = </Banana/YellowMaterial>
+            rel material:binding:physics = </Banana/PhysicsMaterial>
+        }
+    }
+
+    def Material "YellowMaterial"
+    {
+        token outputs:surface.connect = </Banana/YellowMaterial/Shader.outputs:surface>
+
+        def Shader "Shader"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor = (0.95, 0.72, 0.08)
+            float inputs:metallic = 0
+            float inputs:roughness = 0.55
+            token outputs:surface
+        }
+    }
+
+    def Material "PhysicsMaterial" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {
+        float physics:dynamicFriction = 1.8
+        float physics:restitution = 0
+        float physics:staticFriction = 1.8
+    }
+
+    def Capsule "CollisionLeft" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        uniform token axis = "X"
+        # 旧版近似碰撞体保留用于历史对照，但已禁用；实际碰撞使用原 mesh。
+        uniform token visibility = "invisible"
+        double height = 0.07
+        double radius = 0.018
+        bool physics:collisionEnabled = 0
+        rel material:binding:physics = </Banana/PhysicsMaterial>
+        float3 xformOp:rotateXYZ = (0, 0, -18)
+        double3 xformOp:translate = (-0.055, 0.012, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+
+    def Capsule "CollisionCenter" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        uniform token axis = "X"
+        # 旧版近似碰撞体保留用于历史对照，但已禁用；实际碰撞使用原 mesh。
+        uniform token visibility = "invisible"
+        double height = 0.07
+        double radius = 0.018
+        bool physics:collisionEnabled = 0
+        rel material:binding:physics = </Banana/PhysicsMaterial>
+        double3 xformOp:translate = (0, -0.005, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def Capsule "CollisionRight" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        uniform token axis = "X"
+        # 旧版近似碰撞体保留用于历史对照，但已禁用；实际碰撞使用原 mesh。
+        uniform token visibility = "invisible"
+        double height = 0.07
+        double radius = 0.018
+        bool physics:collisionEnabled = 0
+        rel material:binding:physics = </Banana/PhysicsMaterial>
+        float3 xformOp:rotateXYZ = (0, 0, 18)
+        double3 xformOp:translate = (0.055, 0.012, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+}

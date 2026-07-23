@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+logs/
+results/
+data/*.pt
+data/yolo_sam_frames/
+exported/*.pt
+exported/*.json
+reports/*.html

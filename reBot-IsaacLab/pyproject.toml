@@ -1,0 +1,13 @@
+# PEP 517 构建配置：使用 setuptools 生成/安装 rebot_isaaclab 包。
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Ruff 只负责静态格式/质量检查，不参与 Isaac Sim 运行。
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+# 纯 Python 测试统一从 tests 目录发现，避免误收集 Isaac Sim 运行脚本。
+[tool.pytest.ini_options]
+testpaths = ["tests"]

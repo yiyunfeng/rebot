@@ -67,8 +67,10 @@ prepare_graspnet_imports()
 
 # 尝试相对导入 YoloDetection（支持包内和直接脚本运行两种方式）
 try:
+    from .graspnet_target import normalize_binary_mask, projected_points_in_mask
     from .yolo_utils import YoloDetection
 except ImportError:
+    from graspnet_target import normalize_binary_mask, projected_points_in_mask
     from yolo_utils import YoloDetection
 
 # GraspNet 相关导入（依赖上方 prepare_graspnet_imports 注入的路径）
@@ -90,14 +92,15 @@ class GraspNetFrameResult:
     """单帧 GraspNet 推理的完整结果数据。
 
     字段含义：
-        grasps:          最终抓取集合（经过 bbox 过滤 + 宽度过滤后的抓取候选）
-        pre_bbox_grasps: bbox 过滤前的原始抓取集合（来自全场景推理）
-        bbox_grasps:     bbox 过滤后、宽度过滤前的抓取集合
+        grasps:          最终抓取集合（经过 SAM mask + 宽度过滤后的抓取候选）
+        pre_bbox_grasps: 目标过滤前的原始抓取集合；字段名为兼容旧调用保留
+        bbox_grasps:     SAM mask 过滤后、宽度过滤前的集合；字段名为兼容旧调用保留
         best:            最优抓取位姿（经过 NMS + 分数排序后的第一名）
         status:          状态描述字符串（用于 UI 显示）
         target_status:   目标检测状态字符串（YOLO 检测结果摘要）
         detections:      当前帧的 YOLO 检测结果列表
         selected_target: 选中的目标检测（用于抓取的目标对象）
+        target_mask:     实际参与候选筛选的 SAM 二值 mask
         o3d_cloud:       Open3D 格式的点云（用于可视化）
         raw_cloud:       原始点云数组，shape (N, 3)（用于碰撞检测）
     """
@@ -109,8 +112,19 @@ class GraspNetFrameResult:
     target_status: str
     detections: list[YoloDetection]
     selected_target: Optional[YoloDetection]
+    target_mask: Optional[np.ndarray]
     o3d_cloud: o3d.geometry.PointCloud
     raw_cloud: np.ndarray
+
+    @property
+    def pre_target_grasps(self) -> GraspGroup:
+        """返回 SAM mask 过滤前的候选；推荐新代码使用这个名称。"""
+        return self.pre_bbox_grasps
+
+    @property
+    def target_grasps(self) -> GraspGroup:
+        """返回 SAM mask 过滤后的候选；推荐新代码使用这个名称。"""
+        return self.bbox_grasps
 
 
 class Open3DGraspWindow:
@@ -222,8 +236,9 @@ def visualization_grasps(result: GraspNetFrameResult, mode: str) -> GraspGroup:
     """根据模式返回用于 Open3D 可视化的抓取集合。
 
     支持三种模式：
-    - "pre-bbox": 返回 bbox 过滤前的全场景抓取
-    - "bbox":     返回 bbox 过滤后、宽度过滤前的抓取
+    - "pre-mask": 返回 SAM mask 过滤前的全场景抓取
+    - "mask":     返回 SAM mask 过滤后、宽度过滤前的抓取
+    - "pre-bbox" / "bbox": 为兼容旧配置保留的别名
     - 其他/默认:  返回最终抓取集合（全部过滤后）
 
     参数：
@@ -234,10 +249,10 @@ def visualization_grasps(result: GraspNetFrameResult, mode: str) -> GraspGroup:
         对应当前模式的抓取集合
     """
     # 三个集合对应过滤链的不同阶段，用于观察候选在哪一步被删掉。
-    if mode == "pre-bbox":
-        return result.pre_bbox_grasps
-    if mode == "bbox":
-        return result.bbox_grasps
+    if mode in {"pre-mask", "pre-bbox"}:
+        return result.pre_target_grasps
+    if mode in {"mask", "bbox"}:
+        return result.target_grasps
     return result.grasps
 
 
@@ -545,6 +560,31 @@ def filter_grasps_by_bbox(
 
     # 过滤条件：有效深度 AND 投影点落在扩展 bbox 内
     keep = valid_z & (u >= x1) & (u <= x2) & (v >= y1) & (v <= y2)
+    return grasps[keep]
+
+
+def filter_grasps_by_mask(
+    grasps: GraspGroup,
+    target_mask: np.ndarray,
+    K: np.ndarray,
+    *,
+    margin_px: int = 0,
+) -> GraspGroup:
+    """只保留抓取中心投影落在 SAM 目标 mask 内的候选。
+
+    该判断与参考流程一致：使用 ``grasp.translation`` 的相机坐标，通过内参
+    投影为 ``(u, v)``，再检查 ``target_mask[v, u]``。无效深度、图像外投影
+    和 mask 外候选都会被剔除；结果为空时不回退到 bbox 或全场景候选。
+    """
+    if len(grasps) == 0:
+        return grasps
+
+    keep = projected_points_in_mask(
+        np.asarray(grasps.translations, dtype=np.float64),
+        K,
+        target_mask,
+        margin_px=margin_px,
+    )
     return grasps[keep]
 
 
@@ -938,9 +978,9 @@ def infer_frame(
     voxel_size: float = DEFAULT_VOXEL_SIZE,
     yolo_model: Optional[Any] = None,
     yolo_opts: Optional[dict[str, Any]] = None,
+    sam_refiner: Optional[Any] = None,
     target_class: Optional[str] = None,
     target_margin_px: int = 0,
-    target_expand_ratio: float = 1.0,
     max_grasp_width_m: Optional[float] = None,
 ) -> GraspNetFrameResult:
     """执行完整的单帧 GraspNet 推理流程。
@@ -951,22 +991,26 @@ def infer_frame(
            - 调用 select_target 从中选择目标对象。
            - 如果指定了 target_class 但未找到匹配目标，跳过抓取推理。
 
-        2. **点云构建**：
+        2. **SAM 目标精分割**（有 YOLO 目标时必需）：
+           - 使用选中目标的 YOLO 框提示 SAM。
+           - SAM 未返回有效 mask 时跳过抓取推理，不回退到 bbox。
+
+        3. **点云构建**：
            - 从 RGB-D 图像和相机内参构建 GraspNet 输入点云。
 
-        3. **抓取推理**：
+        4. **抓取推理**：
            - 前向推理 + 解码 + 碰撞检测（infer_grasps）。
 
-        4. **Bbox 过滤**（仅当有 YOLO 目标时）：
-           - 使用 filter_grasps_by_bbox 将抓取限制在目标周围。
+        5. **SAM mask 过滤**（仅当有 YOLO 目标时）：
+           - 将抓取中心投影回图像，只保留位于目标 mask 内的候选。
 
-        5. **宽度过滤**：
+        6. **宽度过滤**：
            - 使用 filter_grasps_by_width 排除夹爪无法容纳的抓取。
 
-        6. **最优选择**：
+        7. **最优选择**：
            - 使用 select_best_grasp 选出 NMS+排序后的最优抓取。
 
-        7. **组装结果**：
+        8. **组装结果**：
            - 将各阶段结果组装为 GraspNetFrameResult 返回。
 
     参数：
@@ -981,9 +1025,9 @@ def infer_frame(
         voxel_size:         体素尺寸
         yolo_model:         YOLO 模型实例（可选）
         yolo_opts:          YOLO 运行参数
+        sam_refiner:         SAM mask 精修器；启用 YOLO 目标筛选时必需
         target_class:       目标类别名
-        target_margin_px:   bbox 过滤的像素外扩
-        target_expand_ratio: bbox 扩展比例
+        target_margin_px:   SAM mask 的可选膨胀半径（像素），0 表示严格使用原 mask
         max_grasp_width_m:  最大允许抓取宽度（米）
 
     返回：
@@ -998,6 +1042,7 @@ def infer_frame(
     # 初始化变量
     detections: list[YoloDetection] = []
     selected_target: Optional[YoloDetection] = None
+    target_mask: Optional[np.ndarray] = None
     target_label = "full scene"
 
     # 步骤 1: YOLO 目标检测（可选）
@@ -1019,52 +1064,75 @@ def infer_frame(
                 target_status=target_status,
                 detections=detections,
                 selected_target=None,
+                target_mask=None,
                 o3d_cloud=empty_cloud,
                 raw_cloud=np.empty((0, 3), dtype=np.float32),
             )
         target_label = f"{selected_target.class_name} {selected_target.conf:.2f}"
 
-    # 步骤 2-3: 点云构建 + 抓取推理
+        # GraspNet 的目标判断必须使用 SAM 精分割结果，不能再退回 YOLO bbox。
+        if sam_refiner is None:
+            raise RuntimeError("SAM refiner is required when GraspNet target filtering is enabled.")
+        target_mask = sam_refiner.refine_bbox(color_bgr, selected_target.bbox_xyxy)
+        if target_mask is not None:
+            target_mask = normalize_binary_mask(target_mask, color_bgr.shape[:2])
+        if target_mask is None or not np.any(target_mask):
+            target_status = target_status_text(selected_target, detections, target_class)
+            empty = GraspGroup()
+            empty_cloud = o3d.geometry.PointCloud()
+            return GraspNetFrameResult(
+                grasps=empty,
+                pre_bbox_grasps=empty,
+                bbox_grasps=empty,
+                best=None,
+                status=f"inference skipped: {target_status}; SAM mask unavailable",
+                target_status=f"{target_status} SAM mask unavailable",
+                detections=detections,
+                selected_target=selected_target,
+                target_mask=target_mask,
+                o3d_cloud=empty_cloud,
+                raw_cloud=np.empty((0, 3), dtype=np.float32),
+            )
+
+    # 步骤 3-4: 点云构建 + 抓取推理
     tic = time.time()
     end_points, o3d_cloud, raw_cloud = build_end_points(color_bgr, depth_mm, K, num_point, min_depth, max_depth)
     grasps, counts = infer_grasps(net, end_points, raw_cloud, collision_thresh, voxel_size)
 
-    # 保存 bbox 过滤前的全场景抓取（用于可视化比较）
+    # 保存 SAM mask 过滤前的全场景抓取（用于可视化比较）。
     pre_bbox_grasps = copy_grasp_group(grasps)
 
-    # 步骤 4: Bbox 过滤（仅当有 YOLO 目标时）
+    # 步骤 5: SAM mask 过滤（仅当有 YOLO 目标时）。
     if selected_target is not None:
-        grasps = filter_grasps_by_bbox(
+        grasps = filter_grasps_by_mask(
             grasps,
-            selected_target.bbox_xyxy,
+            target_mask,
             K,
             margin_px=target_margin_px,
-            expand_ratio=target_expand_ratio,
-            image_shape=color_bgr.shape[:2],
         )
 
-    # 保存 bbox 过滤后的抓取（用于可视化比较）
+    # 保存 SAM mask 过滤后的抓取（用于可视化比较）。
     bbox_grasps = copy_grasp_group(grasps)
 
-    # 步骤 5: 宽度过滤
+    # 步骤 6: 宽度过滤
     grasps = filter_grasps_by_width(grasps, max_grasp_width_m)
 
-    # 步骤 6: 最优抓取选择（NMS + 分数排序）
+    # 步骤 7: 最优抓取选择（NMS + 分数排序）
     best = select_best_grasp(grasps)
 
     # 计时
     elapsed = time.time() - tic
 
-    # 步骤 7: 生成状态描述文本
+    # 步骤 8: 生成状态描述文本
     if yolo_model is None:
         status = f"grasps={len(grasps)} decoded={counts['decoded']} inference={elapsed:.2f}s"
         target_status = "YOLO disabled: full-scene GraspNet"
     else:
         status = (
-            f"{target_label} grasps={len(grasps)}/{len(bbox_grasps)}/{len(pre_bbox_grasps)} decoded={counts['decoded']} "
+            f"{target_label} grasps={len(grasps)} mask={len(bbox_grasps)}/{len(pre_bbox_grasps)} decoded={counts['decoded']} "
             f"collide={counts['collision_removed']}/{counts['pre_collision']} inference={elapsed:.2f}s"
         )
-        target_status = target_status_text(selected_target, detections, target_class)
+        target_status = f"{target_status_text(selected_target, detections, target_class)} SAM mask"
 
     # 组装并返回完整结果
     return GraspNetFrameResult(
@@ -1076,6 +1144,7 @@ def infer_frame(
         target_status=target_status,
         detections=detections,
         selected_target=selected_target,
+        target_mask=target_mask,
         o3d_cloud=o3d_cloud,
         raw_cloud=raw_cloud,
     )

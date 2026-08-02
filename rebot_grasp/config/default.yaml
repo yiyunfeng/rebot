@@ -103,6 +103,8 @@ grasp_pipeline:
     depth_quantile: 0.5
     pregrasp_offset_m: 0.080
     insertion_depth_m: 0.015
+    # 真机和仿真抓取前统一使用固定总开度，不再叠加视觉估计宽度。
+    gripper_open_width_m: 0.06
     min_base_z_m: 0.00
 
 graspnet:
@@ -115,9 +117,9 @@ graspnet:
   max_depth: 1.0
   top_k: 50
   target_class: null
-  target_margin_px: 12
-  target_expand_ratio: 1.35
-  # true 时先用 YOLO 选目标，再只保留目标框附近的 GraspNet 抓取候选；
+  # SAM mask 的膨胀半径。0 表示严格按 mask 判断；RGB-D 对齐有少量误差时可设 1~3。
+  target_margin_px: 0
+  # true 时先用 YOLO 选目标、SAM 精分割，再只保留中心投影位于 mask 内的候选；
   # false 时做全场景抓取，适合先确认 GraspNet 本身能否跑通。
   use_yolo_filter: true
   # 夹爪最大开口，超过该宽度的 GraspNet 候选会被过滤。

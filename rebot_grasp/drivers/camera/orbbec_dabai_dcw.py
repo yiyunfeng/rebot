@@ -112,10 +112,13 @@ class OrbbecDaBaiDCW(CameraDriver):
         os.close(devnull)
 
         try:
-            # 设置 SDK 日志级别为 FATAL，进一步减少噪声
+            # 当前项目内 pyorbbecsdk 暴露的是 OBLogLevel/set_logger_level，
+            # 不是 OBLogSeverity/set_logger_severity。旧写法会抛异常后被静默
+            # 忽略，导致 Pipeline.stop() 时原生 USB warning 大量刷屏。
             try:
-                from pyorbbecsdk import OBLogSeverity
-                Context().set_logger_severity(OBLogSeverity.FATAL)
+                from pyorbbecsdk import OBLogLevel
+
+                Context.set_logger_level(OBLogLevel.NONE)
             except Exception:
                 pass
 
@@ -166,6 +169,14 @@ class OrbbecDaBaiDCW(CameraDriver):
     def close(self) -> None:
         """关闭相机 Pipeline，停止流传输。"""
         if self._pipeline is not None:
+            try:
+                # 某些 SDK 路径会在运行期间重新设置日志级别；停止前再次关闭
+                # 原生日志，避免正常的 libusb cancel 返回值刷满终端。
+                from pyorbbecsdk import Context, OBLogLevel
+
+                Context.set_logger_level(OBLogLevel.NONE)
+            except Exception:
+                pass
             try:
                 self._pipeline.stop()
             except Exception:

@@ -76,6 +76,7 @@ _prepare_imports()
 import utils.graspnet_utils as graspnet_utils  # noqa: E402
 from drivers.camera import make_camera  # noqa: E402
 from utils.camera_utils import configure_camera, load_config  # noqa: E402
+from utils.sam_utils import draw_sam_masks_overlay, load_sam_refiner  # noqa: E402
 from utils.yolo_utils import detect_objects, load_yolo  # noqa: E402
 
 
@@ -131,9 +132,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument(
         "--open3d-grasps",
-        choices=("final", "bbox", "pre-bbox"),
+        choices=("final", "mask", "pre-mask", "bbox", "pre-bbox"),
         default="final",
-        help="Open3D 中显示的抓取集：final（最终抓取）, bbox（框内抓取）, 或 pre-bbox（粗抓取）",
+        help="Open3D 中显示的抓取集：final（最终）, mask（SAM 内）, 或 pre-mask（SAM 筛选前）",
     )
     return parser.parse_args()
 
@@ -162,13 +163,20 @@ def main() -> None:
     max_depth = float(graspnet_cfg.get("max_depth", 2.0))
     top_k = int(graspnet_cfg.get("top_k", 50))
     target_class = graspnet_cfg.get("target_class")
-    target_margin_px = int(graspnet_cfg.get("target_margin_px", 12))
-    target_expand_ratio = float(graspnet_cfg.get("target_expand_ratio", 1.0))
+    target_margin_px = int(graspnet_cfg.get("target_margin_px", 0))
 
     # 构建 GraspNet 网络模型
     net = graspnet_utils.build_net(str(checkpoint), graspnet_utils.DEFAULT_NUM_VIEW)
     # 加载 YOLO 目标检测模型（用于在 2D 图像上标注目标框）
     yolo_model, yolo_opts = load_yolo(cfg, project_root=PROJECT_ROOT)
+    # GraspNet 目标判断强制使用 SAM；sam.enabled 仍只控制普通 OBB 调试流程。
+    sam_cfg = dict(cfg.get("sam", {}))
+    sam_cfg["enabled"] = True
+    cfg_for_sam = dict(cfg)
+    cfg_for_sam["sam"] = sam_cfg
+    sam_refiner = load_sam_refiner(cfg_for_sam, project_root=PROJECT_ROOT)
+    if sam_refiner is None:
+        raise RuntimeError("GraspNet target filtering requires SAM.")
     # GraspNet demo 的实时预览主要用于取当前帧，YOLO 框只是辅助选目标。
     # 30fps 相机下若每 3 帧跑一次 YOLO，容易让 SDK 队列堆满并丢旧帧；
     # 因此这里把实时 YOLO 更新频率限制到至少每 15 帧一次。按 G 推理时
@@ -204,7 +212,7 @@ def main() -> None:
         print("Camera intrinsics:")
         print(cam.K)
         print("Press G or SPACE to infer current frame. Press Q or ESC to quit.")
-        print(f"YOLO bbox post-filter mode: target={target_class or 'best detection'}")
+        print(f"YOLO -> SAM mask post-filter mode: target={target_class or 'best detection'}")
         print(f"Live YOLO update interval: every {yolo_opts['infer_every']} frames")
 
         while True:
@@ -310,9 +318,9 @@ def main() -> None:
                         voxel_size=graspnet_utils.DEFAULT_VOXEL_SIZE,
                         yolo_model=yolo_model,
                         yolo_opts=yolo_opts,
+                        sam_refiner=sam_refiner,
                         target_class=target_class,
                         target_margin_px=target_margin_px,
-                        target_expand_ratio=target_expand_ratio,
                     )
                     status = result.status
                     target_status = result.target_status
@@ -320,8 +328,12 @@ def main() -> None:
                     selected_target = result.selected_target
                     print(status)
                     # 在 2D 图像上绘制检测框和最佳抓取 2D 投影
+                    display_base = infer_color.copy()
+                    if result.target_mask is not None and selected_target is not None:
+                        target_key = (selected_target.result_index, selected_target.detection_index)
+                        draw_sam_masks_overlay(display_base, {target_key: result.target_mask})
                     display_base = graspnet_utils.draw_detections_overlay(
-                        infer_color,
+                        display_base,
                         last_detections,
                         selected_target,
                         target_class,

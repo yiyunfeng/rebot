@@ -94,6 +94,22 @@ class SamMaskRefiner:
                     overrides[(result_index, detection_index)] = mask
         return overrides
 
+    def refine_bbox(
+        self,
+        color_bgr: np.ndarray,
+        bbox_xyxy: tuple[int, int, int, int],
+    ) -> np.ndarray | None:
+        """只对一个已选中的 YOLO 目标框生成 SAM mask。
+
+        GraspNet 只会抓取一个目标，无需像普通多目标预览那样分割全部检测框。
+        这个入口让目标选择先发生，再只运行一次 SAM。
+        """
+        predictor = self._load_predictor()
+        image_rgb = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2RGB)
+        predictor.set_image(image_rgb)
+        sam_results = predictor(bboxes=[list(map(float, bbox_xyxy))])
+        return self._first_mask(sam_results, color_bgr.shape[:2])
+
     def _load_predictor(self) -> Any:
         """懒加载 Ultralytics SAM Predictor。"""
         # _predictor 初始为 None。模型只在第一次真正分割时创建，

@@ -434,8 +434,7 @@ graspnet:
   max_depth: 1.0
   top_k: 50
   target_class: null
-  target_margin_px: 12
-  target_expand_ratio: 1.35
+  target_margin_px: 0
   use_yolo_filter: true
   max_grasp_width_m: 0.065
 ```
@@ -461,7 +460,9 @@ graspnet:
 - `grasp_pipeline.grasp.pregrasp_offset_m`：预抓取位相对最终抓取位，沿末端进给方向回退的距离，单位米。
 - `grasp_pipeline.grasp.insertion_depth_m`：GraspNet 执行时沿进给方向额外插入的距离。
 - `grasp_pipeline.grasp.min_base_z_m`：机械臂基坐标系下允许的最低抓取高度。
-- `graspnet`：`scripts/graspnet_camera_demo.py` 和 `scripts/grasp.py` 使用的 GraspNet 运行参数。
+- `graspnet.use_yolo_filter`：启用后由 YOLO 选择单个目标、SAM 精分割目标，只保留中心投影位于 SAM mask 内的 GraspNet 候选；SAM mask 缺失或为空时不会退回 bbox 候选。
+- `graspnet.target_margin_px`：SAM mask 的可选膨胀半径，单位像素。`0` 表示严格使用原 mask；仅在确认 RGB-D 对齐存在少量误差时设置小值。
+- `graspnet`：其余参数供 `scripts/graspnet_camera_demo.py` 和 `scripts/grasp.py` 使用。
 
 ### 模型选择库
 
@@ -546,7 +547,7 @@ python scripts/ordinary_grasp_pipeline.py
 
 ### 4. `scripts/graspnet_camera_demo.py` — GraspNet 相机估计 Demo
 
-不连接机械臂，仅使用 RGB-D 相机运行 GraspNet 6D 夹取姿态估计。脚本会保留实时相机预览，并使用 YOLO 检测框选择目标区域，再从 GraspNet 全场景候选中筛选目标 bbox 内的可行夹取。按 `G` 或 `Space` 对当前帧推理，按 `R` 恢复实时预览，按 `Q` 或 `Esc` 退出；推理后可通过 Open3D 查看点云与夹取候选。
+不连接机械臂，仅使用 RGB-D 相机运行 GraspNet 6D 夹取姿态估计。YOLO 先选择目标，其检测框作为 SAM prompt；随后把 GraspNet 全场景候选中心投影回图像，只保留落在目标 SAM mask 内的候选。冻结画面会叠加实际参与筛选的 mask。按 `G` 或 `Space` 对当前帧推理，按 `R` 恢复实时预览，按 `Q` 或 `Esc` 退出。
 
 ```bash
 cd /home/yyf/Desktop/pythonProject/rebot/rebot_grasp
@@ -556,7 +557,7 @@ cd /home/yyf/Desktop/pythonProject/rebot/rebot_grasp
 
 ### 5. `scripts/grasp.py` — GraspNet 机械臂抓取程序
 
-`scripts/grasp.py` 由 `scripts/main.py` 在 `perception.backend: "graspnet"` 时自动调用。参数统一写在 `config/default.yaml` 的 `graspnet`、`grasp_pipeline`、`robot` 段里，正式运行只用统一入口：
+`scripts/grasp.py` 由 `scripts/main.py` 在 `perception.backend: "graspnet"` 时自动调用。YOLO 负责选目标，SAM mask 负责目标归属判断，只有 mask 内候选才会继续进行夹爪宽度和 IK 检查。参数统一写在 `config/default.yaml` 的 `graspnet`、`grasp_pipeline`、`robot` 段里，正式运行只用统一入口：
 
 ```bash
 cd /home/yyf/Desktop/pythonProject/rebot/rebot_grasp

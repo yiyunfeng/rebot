@@ -381,8 +381,8 @@ graspnet:
   max_depth: 1.0
   top_k: 50
   target_class: null
-  target_margin_px: 12
-  target_expand_ratio: 1.35
+  target_margin_px: 0
+  use_yolo_filter: true
 ```
 
 ### YAML parameter notes
@@ -404,7 +404,9 @@ graspnet:
 - `grasp_pipeline.grasp.pregrasp_offset_m`: distance, in meters, to retreat along the tool approach direction when generating the pre-grasp pose.
 - `grasp_pipeline.grasp.insertion_depth_m`: additional insertion distance along the approach direction for GraspNet execution.
 - `grasp_pipeline.grasp.min_base_z_m`: minimum allowed grasp height in the robot base frame.
-- `graspnet`: GraspNet runtime parameters used by `scripts/graspnet_camera_demo.py` and `scripts/grasp.py`.
+- `graspnet.use_yolo_filter`: when enabled, YOLO selects one target, SAM refines its mask, and only GraspNet candidates whose projected centers lie inside that mask are retained. Missing/empty SAM masks do not fall back to bbox candidates.
+- `graspnet.target_margin_px`: optional SAM-mask dilation radius in pixels. `0` uses the exact mask; use a small value only to compensate for known RGB-D alignment error.
+- `graspnet`: the remaining GraspNet runtime parameters used by `scripts/graspnet_camera_demo.py` and `scripts/grasp.py`.
 
 ### Model selection
 
@@ -421,7 +423,7 @@ Common choices:
 
 If the model name contains `world` or `yoloe`, and `yolo.use_world=true`, the program calls `model.set_classes(custom_classes)` and injects `yolo.custom_classes` as open-vocabulary categories. Standard `yolov8*-seg.pt` models ignore these open-vocabulary class entries.
 
-SAM is optional and disabled by default. To refine real-camera grasp masks, put the SAM weight in `models/` or use an absolute path, then set:
+SAM is optional for the ordinary OBB pipeline and disabled there by default. GraspNet target filtering always loads the configured SAM model when `graspnet.use_yolo_filter=true`. Put the SAM weight in `models/` or use an absolute path:
 
 ```yaml
 sam:
@@ -481,7 +483,7 @@ Runs OBB grasp pose estimation and visualization without connecting to the arm. 
 
 ### 4. `scripts/graspnet_camera_demo.py` — GraspNet camera estimation demo
 
-Runs GraspNet 6D grasp pose estimation with only the RGB-D camera, without connecting to the robotic arm. The script keeps a live camera preview, uses YOLO bounding boxes to select the target area, and filters feasible GraspNet full-scene candidates by the target bbox. Press `G` or `Space` to infer the current frame, `R` to resume live preview, and `Q` or `Esc` to quit. After inference, Open3D can visualize the point cloud and grasp candidates.
+Runs GraspNet 6D grasp pose estimation with only the RGB-D camera, without connecting to the robotic arm. YOLO selects one target, its box prompts SAM, and each full-scene GraspNet candidate center is projected into the image and retained only when it falls inside the SAM mask. The inference snapshot overlays the exact mask used for filtering. Press `G` or `Space` to infer the current frame, `R` to resume live preview, and `Q` or `Esc` to quit.
 
 ```bash
 python scripts/graspnet_camera_demo.py
@@ -489,7 +491,7 @@ python scripts/graspnet_camera_demo.py
 
 ### 5. `scripts/grasp.py` — GraspNet robotic grasping program
 
-Connects the GraspNet estimate to the robotic arm execution flow. YOLO selects the target, GraspNet outputs a 6D grasp pose, hand-eye calibration transforms it into the robot base frame, and the script checks IK reachability before running the pre-grasp, grasp, and retreat motion sequence. For debugging, start with `--dry-run` to print the target poses and candidate filtering result without moving the arm.
+Connects the GraspNet estimate to the robotic arm execution flow. YOLO selects the target, SAM supplies the target mask, GraspNet outputs 6D candidates, and only mask-contained candidates proceed to width and IK checks before the pre-grasp, grasp, and retreat motion sequence.
 
 ```bash
 python scripts/grasp.py --dry-run

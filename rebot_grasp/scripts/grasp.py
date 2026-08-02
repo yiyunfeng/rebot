@@ -73,6 +73,7 @@ from utils.camera_utils import (  # noqa: E402
     load_config,
     load_hand_eye,
 )
+from utils.sam_utils import draw_sam_masks_overlay, load_sam_refiner  # noqa: E402
 from utils.transforms import (  # noqa: E402
     apply_execution_compensation_to_pose,
     canonicalize_parallel_gripper_tcp_rotation,
@@ -82,8 +83,6 @@ from utils.transforms import (  # noqa: E402
 from utils.yolo_utils import (  # noqa: E402
     YoloDetection,
     detect_objects,
-)
-from utils.yolo_utils import (
     load_yolo as load_yolo_from_config,
 )
 
@@ -381,18 +380,17 @@ def main() -> int:
     voxel_size = float(graspnet_cfg.get("voxel_size", 0.01))
     min_depth = float(graspnet_cfg.get("min_depth", 0.05))
     max_depth = float(graspnet_cfg.get("max_depth", 1.0))
-    # 启用 YOLO 过滤时，只保留目标检测框附近的点云，避免 GraspNet 抓到其它物体。
-    # target_margin_px/target_expand_ratio 用于适当扩大检测区域，保留物体边缘点。
+    # 启用目标过滤时，YOLO 负责选目标，SAM mask 决定哪些 GraspNet 候选属于目标。
+    # target_margin_px 可膨胀 mask，容忍 RGB-D 对齐误差；0 表示严格使用原 mask。
     target_class = graspnet_cfg.get("target_class")
-    target_margin_px = int(graspnet_cfg.get("target_margin_px", 12))
-    target_expand_ratio = float(graspnet_cfg.get("target_expand_ratio", 1.0))
+    target_margin_px = int(graspnet_cfg.get("target_margin_px", 0))
     use_yolo_filter = bool(graspnet_cfg.get("use_yolo_filter", True))
     # Open3D 窗口只用于查看点云和候选抓取，不参与机械臂控制。
     open3d_enabled = bool(graspnet_cfg.get("open3d_enabled", True))
-    open3d_grasps = str(graspnet_cfg.get("open3d_grasps", "pre-bbox"))
-    # 配置值不合法时退回 pre-bbox，防止后面找不到对应的候选集合。
-    if open3d_grasps not in {"final", "bbox", "pre-bbox"}:
-        open3d_grasps = "pre-bbox"
+    open3d_grasps = str(graspnet_cfg.get("open3d_grasps", "pre-mask"))
+    # bbox/pre-bbox 是旧配置别名，继续支持；新配置使用 mask/pre-mask。
+    if open3d_grasps not in {"final", "mask", "pre-mask", "bbox", "pre-bbox"}:
+        open3d_grasps = "pre-mask"
     warmup_frames = int(graspnet_cfg.get("warmup_frames", 20))
 
     # make_camera() 根据 camera.type 创建对应 RGB-D 相机驱动。
@@ -458,6 +456,17 @@ def main() -> int:
             no_yolo=not use_yolo_filter,
         )
         last_target_status = "YOLO disabled: full-scene GraspNet" if yolo_model is None else "target detector warming up..."
+        sam_refiner = None
+        if yolo_model is not None:
+            # GraspNet 目标模式强制加载 SAM；sam.enabled 只控制普通 OBB 调试流程。
+            sam_cfg = dict(cfg.get("sam", {}))
+            sam_cfg["enabled"] = True
+            cfg_for_sam = dict(cfg)
+            cfg_for_sam["sam"] = sam_cfg
+            sam_refiner = load_sam_refiner(cfg_for_sam, project_root=PROJECT_ROOT)
+            if sam_refiner is None:
+                raise RuntimeError("GraspNet target filtering requires SAM.")
+            print("[SAM] enabled: selected YOLO box -> target mask -> GraspNet candidate filter")
         # 加载 GraspNet 网络及权重；真正的逐帧推理只在按 G/Space 后发生。
         net = graspnet_utils.build_net(checkpoint, num_view)
 
@@ -551,8 +560,8 @@ def main() -> int:
                 try:
                     # infer_frame() 内部完成：
                     # 1. RGB-D 反投影为点云并采样 num_point 个点；
-                    # 2. 可选地按 YOLO 目标框限制点云区域；
-                    # 3. GraspNet 生成候选，并执行碰撞、检测框和夹爪宽度过滤；
+                    # 2. YOLO 选目标，并由 SAM 精分割目标区域；
+                    # 3. GraspNet 生成候选，并执行碰撞、SAM mask 和夹爪宽度过滤；
                     # 4. 返回最终候选、最高分结果以及用于 Open3D 显示的中间候选。
                     result = graspnet_utils.infer_frame(
                         net,
@@ -566,9 +575,9 @@ def main() -> int:
                         voxel_size=voxel_size,
                         yolo_model=yolo_model,
                         yolo_opts=yolo_opts,
+                        sam_refiner=sam_refiner,
                         target_class=target_class,
                         target_margin_px=target_margin_px,
-                        target_expand_ratio=target_expand_ratio,
                         max_grasp_width_m=GRIPPER_MAX_DISTANCE_M,
                     )
                 except Exception as exc:
@@ -581,17 +590,18 @@ def main() -> int:
                 last_target_status = result.target_status
                 last_detections = result.detections
                 selected_target = result.selected_target
-                # 根据 open3d_grasps 选择显示最终、bbox 后或 bbox 前的候选集合。
+                # 根据 open3d_grasps 选择显示最终、mask 后或 mask 前的候选集合。
                 vis_grasps = graspnet_utils.visualization_grasps(result, open3d_grasps)
 
                 print(f"[G] {status}")
                 if open3d_enabled:
                     try:
                         # 第一次推理后才创建 Open3D 窗口，后续只更新点云和抓取几何体。
-                        if vis is None:
+                        if vis is None and len(vis_grasps) > 0:
                             vis = graspnet_utils.Open3DGraspWindow("GraspNet Grasps", top_k)
-                        vis.update(result.o3d_cloud, vis_grasps)
-                        print(f"[G] Open3D {open3d_grasps} candidates={len(vis_grasps)}")
+                        if vis is not None:
+                            vis.update(result.o3d_cloud, vis_grasps)
+                            print(f"[G] Open3D {open3d_grasps} candidates={len(vis_grasps)}")
                     except Exception as exc:
                         # Open3D 可视化失败不应影响二维预览和机械臂抓取，因此只关闭该窗口。
                         print(f"[G] Open3D failed: {exc}")
@@ -599,16 +609,20 @@ def main() -> int:
                             vis.close()
                             vis = None
 
-                if result.best is None:
-                    # 所有候选被碰撞、目标框或夹爪宽度过滤后，不能执行机械臂动作。
-                    print("[G] No valid GraspNet grasp")
-                    continue
-
-                # 保存抓取瞬间，并在图像上保留当时的 YOLO 框和推理状态。
+                # 冻结抓取瞬间，并叠加真正参与候选判断的 SAM mask。
+                # 即使 mask 内没有可行候选，也保留画面供用户核对分割结果。
                 frozen = True
-                display_base = snap_color
+                display_base = snap_color.copy()
+                if result.target_mask is not None and selected_target is not None:
+                    target_key = (selected_target.result_index, selected_target.detection_index)
+                    draw_sam_masks_overlay(display_base, {target_key: result.target_mask})
                 if yolo_model is not None:
-                    display_base = graspnet_utils.draw_detections_overlay(snap_color, last_detections, selected_target, target_class)
+                    display_base = graspnet_utils.draw_detections_overlay(
+                        display_base,
+                        last_detections,
+                        selected_target,
+                        target_class,
+                    )
                 snap_display = graspnet_utils.draw_status(
                     display_base,
                     f"SNAPSHOT | {status}",
@@ -617,6 +631,11 @@ def main() -> int:
                     title="Main - GraspNet Grasp",
                 )
                 last_display = snap_display
+
+                if result.best is None:
+                    # 所有候选被碰撞、SAM mask 或夹爪宽度过滤后，不能执行机械臂动作。
+                    print("[G] No valid GraspNet grasp")
+                    continue
 
                 if T_hand_eye is None:
                     # 没有手眼矩阵时只能把相机坐标系中的抓取投影到图像，不能换算成机械臂目标。

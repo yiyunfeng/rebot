@@ -34,10 +34,6 @@ sim2real:
   ready_arm: [-0.00000847, -0.44618440, -0.71451218, 0.96833512, -0.00000885, 0.00009368]
   ready_duration_s: 3.0
   camera_view_gripper_m: 0.00
-  # 抓取后不再回到当前识别到的香蕉位置放置，而是放到固定桌面点。
-  # 该点位于前几轮日志中 IK 可成功的桌面区域，z 为香蕉中心接近桌面时的高度。
-  place_position: [0.40, 0.00, 0.021]
-
 scene:
   ground_z: -0.04
   table:
@@ -46,8 +42,7 @@ scene:
   object:
     asset_path: assets/banana/bananas_1k.usdc
     source_prim_path: /bananas/bananas_a
-    # 源单香蕉 mesh 带少量局部偏移；该平移使几何中心约位于桌面 (0.32, 0)。
-    position: [0.40, 0.0, 0.019]
+    position: [0.375, 0.0, 0.019]
     rotation_deg: [0.0, 0.0, 0.0]
     scale: [1.0, 1.0, 1.0]
     mass: 0.12

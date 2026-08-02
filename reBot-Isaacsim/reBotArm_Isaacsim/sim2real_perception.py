@@ -212,10 +212,13 @@ def _save_sim_plan(
     vertical_tcp_rotation = np.column_stack(
         [vertical_tool_x, vertical_tool_y, vertical_tool_z]
     )
-    # 放置点回到本轮夹取位置的正上方 3 cm。这里的 object_position_world 是视觉
-    # 检测到的香蕉中心；放置时只抬高 Z，不改 X/Y，便于观察“抓起 -> 原位上方放下”。
+    # 放回本轮视觉检测到的物体位置正上方 3 cm：X/Y 跟随当前物体，
+    # 既不读取固定点，也不进行随机采样；Z 抬高后再执行竖直下放。
     place_height_offset_m = 0.03
-    place_object_position = object_position_world + np.array([0.0, 0.0, place_height_offset_m])
+    place_object_position = object_position_world + np.array(
+        [0.0, 0.0, place_height_offset_m],
+        dtype=np.float64,
+    )
     # reBot TCP +X 为夹爪前进方向。竖直放置时 +X 指向桌面，所以实际 TCP 目标点
     # 需要从期望物体中心沿 +X 深入 insertion_depth。
     place_position = place_object_position + vertical_tool_x * insertion_depth
@@ -232,10 +235,13 @@ def _save_sim_plan(
     place_q = np.asarray(place_ik.q[:6], dtype=np.float64)
 
     gripper_cfg = dm_cfg["gripper"]
-    # 感知输出 jaw_width_m 是左右指尖之间的总开口，而 Isaac 控制的是单侧手指
-    # 滑动距离，因此先除以 2；再增加每侧 3 mm 余量，避免接近时提前碰撞物体。
+    # 配置值是左右指尖的固定总开度，Isaac 控制量是单侧滑块位移，
+    # 因此每侧目标 = gripper_open_width_m / 2，单位均为 m。
+    open_width = float(grasp_cfg["gripper_open_width_m"])
+    if not np.isfinite(open_width) or open_width <= 0.0:
+        raise ValueError("gripper_open_width_m 必须是正有限值")
     open_per_finger = np.clip(
-        float(best.jaw_width_m) / 2.0 + 0.003,
+        open_width / 2.0,
         gripper_cfg["command_min_m"],
         gripper_cfg["command_max_m"],
     )

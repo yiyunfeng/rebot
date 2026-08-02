@@ -5,14 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONDA_ENV="${REBOT_CONDA_ENV:-rebotarm_gpu}"
 CONDA_BASE="$(conda info --base)"
 
-echo "Real robot: B601-DM using the serial channel from the SDK YAML"
-echo "Confirm joint/gripper limits, clear workspace, and keep the emergency stop ready."
-read -r -p "Type RUN REAL to continue: " CONFIRMATION
-if [[ "${CONFIRMATION}" != "RUN REAL" ]]; then
-  echo "Cancelled before connecting hardware."
-  exit 0
-fi
-
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
@@ -45,6 +37,5 @@ env \
   -u LD_LIBRARY_PATH \
   -u AMENT_PREFIX_PATH \
   -u CMAKE_PREFIX_PATH \
-  REBOT_REAL_CONFIRMED=1 \
   MPLCONFIGDIR=/tmp/rebot-matplotlib \
   python "${SCRIPT_DIR}/real_grasp_executor.py"

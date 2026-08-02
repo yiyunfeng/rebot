@@ -43,7 +43,10 @@ DEFAULT_TEACHER_TRAJECTORY = Path("/tmp/rebot_sim_teacher_trajectory.npz")
 
 # Teacher 轨迹收集参数
 TEACHER_IMAGE_SIZE = 64                                    # 缩略图分辨率
-TEACHER_STAGES = {"pregrasp", "grasp", "close", "retreat"} # 需要采样的阶段
+TEACHER_SAMPLE_HZ = 20                                     # 每个 RGB-D 帧只配一个闭环动作
+TEACHER_CAMERA_HZ = 20                                     # 与 Isaac Lab 腕部相机更新频率一致
+TEACHER_STAGES = {"open", "pregrasp", "grasp", "close", "retreat", "return"}
+TEACHER_ATTEMPT_START = "__attempt_start__"
 
 # 全局运行标志，由信号处理函数控制优雅退出
 _running = True
@@ -133,7 +136,12 @@ def _write_teacher_trajectory(path: Path, trajectory: dict, plan_timestamp: floa
         stage_names=np.asarray(trajectory["stage_names"], dtype="U16"),
         timestamps=np.asarray(trajectory["timestamps"], dtype=np.float64),
         plan_timestamp=np.asarray(plan_timestamp, dtype=np.float64),
+        object_initial_position_m=np.asarray(trajectory["object_initial_position_m"], dtype=np.float32),
         K=np.asarray(trajectory["K"], dtype=np.float32),
+        successful=np.asarray(True, dtype=np.bool_),
+        # v2 从闭爪 ready 位开始，完整保留 open 阶段，并以
+        # 20 Hz 连续仿真时钟取样。旧 producer 文件不得与新数据混用。
+        schema_version=np.asarray(2, dtype=np.int64),
     )
     os.replace(temp_path, path)
 
@@ -164,6 +172,7 @@ def _move_target(
     physics_hz = int(simulation.config["simulation"]["physics_hz"])
     rendering_hz = int(simulation.config["simulation"]["rendering_hz"])
     render_every = max(1, round(physics_hz / rendering_hz))  # 每 N 步渲染一次
+    teacher_render_every = max(1, round(physics_hz / TEACHER_CAMERA_HZ))
 
     # 总步数 = 持续时间 × 物理频率
     steps = max(1, round(float(duration_s) * physics_hz))
@@ -182,7 +191,11 @@ def _move_target(
         simulation._apply_target()  # 将目标写入底层关节控制器
 
         # 物理步进；只在 render_every 步时触发渲染以节省 GPU
-        simulation.world.step(render=(step % render_every == 0))
+        # 普通显示保留 rendering_hz；开启 teacher 时另外保证每个
+        # 20 Hz 采样时刻先完成一次渲染，再在下方读取 RGB-D。
+        # 这样图像、关节状态与时间戳来自同一物理步。
+        should_render_teacher = sample_callback is not None and step % teacher_render_every == 0
+        simulation.world.step(render=(step % render_every == 0 or should_render_teacher))
 
         # 回调：用于 teacher 轨迹采样等
         if sample_callback is not None:
@@ -466,13 +479,21 @@ def _execute_plan(simulation: DMSimulation, plan: dict, sample_callback=None) ->
     # 执行抓取循环
     # ------------------------------------------------------------------
 
-    # 第一步：张开夹爪（为抓取做准备）
+    # Teacher episode 必须从“闭爪 + ready 观察位”开始。先发送
+    # attempt_start 再执行 open，否则策略永远看不到张开夹爪这个必需动作。
+    if sample_callback is not None:
+        sample_callback(TEACHER_ATTEMPT_START, 0, 0)
     run_stage("open")
 
     # 最多尝试 max_grasp_attempts 次抓取
     for attempt in range(1, max_grasp_attempts + 1):
         grasp_attempts = attempt
         print(f"[Execute] grasp attempt {grasp_attempts}/{max_grasp_attempts}")
+
+        # BC 只能学习最终成功的尝试。producer 收到该事件后会清空上一轮失败
+        # 尝试的缓存；否则同一个“成功文件”里会混入碰偏、滑落等错误示范。
+        if sample_callback is not None and attempt > 1:
+            sample_callback(TEACHER_ATTEMPT_START, 0, 0)
 
         # 接近 → 夹取 → 闭合
         run_stage("pregrasp")
@@ -600,7 +621,10 @@ def main() -> None:
         camera = Camera(
             prim_path=CAMERA_PATH,
             resolution=(args.width, args.height),
-            frequency=args.export_hz,
+            # 普通感知帧仍由下面的 period 控制写盘频率；teacher 相机和
+            # Isaac Lab 策略统一为 20 Hz，保证每个动作都有当前 RGB-D，
+            # 不再用一张旧图像监督连续两个不同动作。
+            frequency=max(args.export_hz, TEACHER_CAMERA_HZ),
         )
         camera.initialize()
 
@@ -610,6 +634,99 @@ def main() -> None:
 
         # 获取相机内参矩阵（3×3）
         K = camera.get_intrinsics_matrix()
+
+        # 每次执行新计划前都会换成一个空字典；只有最终抓取成功才原子写盘。
+        teacher_trajectory: dict | None = None
+        teacher_period_s = 1.0 / TEACHER_SAMPLE_HZ
+        teacher_next_sample_time: float | None = None
+
+        def sample_teacher(stage_name: str, step: int, steps: int) -> None:
+            """保存同一物理时刻的图像、实际关节状态与控制目标。
+
+            回调发生在 ``world.step`` 之后。这里读取到的 RGB-D、关节位置和速度
+            属于同一仿真时刻；collector 再用实际状态与下一周期关节目标
+            构造等价 relative IK 动作。采样相位使用连续仿真时钟，不随 stage
+            的 step 计数清零；否则阶段边界会出现过密或过疏样本。
+            """
+
+            nonlocal teacher_next_sample_time
+
+            if teacher_trajectory is None:
+                return
+            if stage_name == TEACHER_ATTEMPT_START:
+                # 只清空逐时刻数组，K 等轨迹级元数据保持不变。
+                for key in (
+                    "color_bgr",
+                    "depth_mm",
+                    "joint_positions",
+                    "joint_velocities",
+                    "joint_targets",
+                    "camera_to_world",
+                    "stage_names",
+                    "timestamps",
+                ):
+                    teacher_trajectory[key].clear()
+                # 第一个物理步就记录闭爪 ready 状态，随后每 50 ms
+                # 记录一次；使用 World time 而非墙上时间，不受渲染快慢影响。
+                teacher_next_sample_time = float(simulation.world.current_time)
+                return
+            if stage_name not in TEACHER_STAGES:
+                return
+            current_time = float(simulation.world.current_time)
+            if teacher_next_sample_time is None or current_time + 1.0e-9 < teacher_next_sample_time:
+                return
+            # world.step 可能越过理论时刻，用 while 把相位推进到下一个
+            # 20 Hz 格点，而不是改成 current_time + period 导致长期漂移。
+            while teacher_next_sample_time <= current_time + 1.0e-9:
+                teacher_next_sample_time += teacher_period_s
+
+            color_rgb = camera.get_rgb()
+            depth_m = camera.get_depth()
+            if color_rgb is None or depth_m is None:
+                return
+
+            actual = simulation.robot.get_joint_positions(joint_indices=simulation.joint_indices)
+            velocities = simulation.robot.get_joint_velocities(joint_indices=simulation.joint_indices)
+            if actual is None:
+                return
+            actual = np.asarray(actual, dtype=np.float64)
+            velocities = (
+                np.zeros_like(actual)
+                if velocities is None
+                else np.asarray(velocities, dtype=np.float64)
+            )
+
+            depth_m = np.asarray(depth_m, dtype=np.float32)
+            depth_m = np.nan_to_num(depth_m, nan=0.0, posinf=0.0, neginf=0.0)
+            color_bgr = np.ascontiguousarray(np.asarray(color_rgb)[..., :3][..., ::-1])
+            color_small = _resize_nearest(
+                color_bgr,
+                TEACHER_IMAGE_SIZE,
+                TEACHER_IMAGE_SIZE,
+            )
+            depth_small_m = _resize_nearest(
+                depth_m,
+                TEACHER_IMAGE_SIZE,
+                TEACHER_IMAGE_SIZE,
+            )
+
+            camera_position, camera_quaternion = camera.get_world_pose(camera_axes="ros")
+            T_camera_to_world = np.eye(4, dtype=np.float64)
+            T_camera_to_world[:3, :3] = quat_to_rot_matrix(camera_quaternion)
+            T_camera_to_world[:3, 3] = np.asarray(camera_position, dtype=np.float64)
+
+            teacher_trajectory["color_bgr"].append(color_small)
+            teacher_trajectory["depth_mm"].append(
+                np.clip(depth_small_m * 1000.0, 0, 65535).astype(np.uint16)
+            )
+            teacher_trajectory["joint_positions"].append(actual)
+            teacher_trajectory["joint_velocities"].append(velocities)
+            teacher_trajectory["joint_targets"].append(simulation.target.copy())
+            teacher_trajectory["camera_to_world"].append(T_camera_to_world)
+            teacher_trajectory["stage_names"].append(stage_name)
+            # 使用仿真时间而非墙上时间。即使仿真低于实时速度运行，相邻样本
+            # 仍严格对应 400 Hz 物理时钟中的 20 个 step（即 20 Hz 控制时序）。
+            teacher_trajectory["timestamps"].append(float(simulation.world.current_time))
 
         # ------------------------------------------------------------------
         # 移动到观测姿态
@@ -700,7 +817,37 @@ def main() -> None:
                     last_plan_timestamp = plan_timestamp
 
                     # 执行抓取放置循环
-                    execution_result = _execute_plan(simulation, plan)
+                    teacher_trajectory = {
+                        "color_bgr": [],
+                        "depth_mm": [],
+                        "joint_positions": [],
+                        "joint_velocities": [],
+                        "joint_targets": [],
+                        "camera_to_world": [],
+                        "stage_names": [],
+                        "timestamps": [],
+                        "K": K,
+                        # 使用感知端发布计划时的世界系物体中心，
+                        # collector 用它检查 100 条 episode 是否真正覆盖工作区。
+                        "object_initial_position_m": np.asarray(plan["object_position_m"], dtype=np.float64),
+                    }
+                    execution_result = _execute_plan(
+                        simulation,
+                        plan,
+                        sample_callback=sample_teacher,
+                    )
+                    if execution_result["grasp_success"] and len(teacher_trajectory["timestamps"]) >= 2:
+                        _write_teacher_trajectory(
+                            DEFAULT_TEACHER_TRAJECTORY,
+                            teacher_trajectory,
+                            plan_timestamp,
+                        )
+                        print(
+                            f"[Teacher] saved synchronized trajectory: "
+                            f"{DEFAULT_TEACHER_TRAJECTORY} "
+                            f"samples={len(teacher_trajectory['timestamps'])}"
+                        )
+                    teacher_trajectory = None
 
                     # 将执行结果写回计划文件，感知端读取后生成下一轮计划
                     plan.update(execution_result)

@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""读取 Real 感知候选并控制 B601-DM 完成一次人工确认的抓取放置循环。
+"""读取 Real 感知候选并控制 B601-DM 自动循环执行抓取和放置。
 
 感知进程只负责相机、YOLO 和 SAM；本进程独占机械臂串口。机械臂停在 ready
 姿态时才接受新候选，随后执行：预抓取、力控夹取、抬起、返回 ready、竖直
-放回原位置、再次返回 ready。每一轮开始前都需要操作者按 Enter 确认。
+放回本轮物体位置、再次返回 ready，然后等待下一份稳定候选继续执行。
 """
 
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -47,6 +46,10 @@ from reBotArm_control_py.actuator import RebotArm  # noqa: E402
 from reBotArm_control_py.controllers import RebotArmEndPose  # noqa: E402
 
 
+class MotionPlanningError(RuntimeError):
+    """目标位姿无法生成 IK/笛卡尔轨迹，可回观测位重新检测后再试。"""
+
+
 def _wait_motion(controller: RebotArmEndPose, duration: float) -> None:
     """等待 SDK 的轨迹发送线程结束，并留出少量机械稳定时间。"""
     thread = getattr(controller, "_send_thread", None)
@@ -71,7 +74,7 @@ def _move_pose(
         f"rpy=({roll:+.3f},{pitch:+.3f},{yaw:+.3f})"
     )
     if not controller.move_to_traj(x, y, z, roll, pitch, yaw, duration=duration):
-        raise RuntimeError(f"{name} IK/trajectory failed")
+        raise MotionPlanningError(f"{name} IK/trajectory failed")
     _wait_motion(controller, duration)
 
 
@@ -109,7 +112,7 @@ def _candidate_to_poses(
     T_hand_eye: np.ndarray,
     cfg: dict,
 ) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
-    """将相机候选转换为 base 下的抓取和竖直放置位姿。"""
+    """将相机候选转换为 base 下的抓取位姿和原位置竖直放置位姿。"""
     position_cam = np.asarray(candidate["position_m"], dtype=np.float64)
     tcp_rotation_cam = np.asarray(candidate["tcp_rotation"], dtype=np.float64)
     if position_cam.shape != (3,) or tcp_rotation_cam.shape != (3, 3):
@@ -135,15 +138,13 @@ def _candidate_to_poses(
         insertion_depth,
     )
 
-    # 放置使用同一个物体位置，但强制 TCP +X 沿 base -Z，形成竖直下放。
+    # 放置点跟随本轮视觉检测到的物体中心，不读取固定坐标，也不随机采样。
+    # 位置公式：p_base = R_cam2base @ p_cam + t_cam2base，单位均为 m。
     object_position_base = T_cam2base[:3, :3] @ position_cam + T_cam2base[:3, 3]
-    tcp_rotation_base = T_cam2base[:3, :3] @ tcp_rotation_cam
+    # 放置姿态不继承抓取 yaw。日志中的 rpy=(2.794, 1.571, 0) 位于欧拉角
+    # 奇异附近并触发 IK 失败；固定水平 Y 轴后，位置仍跟随物体，姿态保持稳定。
     vertical_x = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-    vertical_y = tcp_rotation_base[:, 1].copy()
-    vertical_y[2] = 0.0
-    if np.linalg.norm(vertical_y) < 1e-6:
-        vertical_y = np.array([0.0, 1.0, 0.0], dtype=np.float64)
-    vertical_y /= np.linalg.norm(vertical_y)
+    vertical_y = np.array([0.0, 1.0, 0.0], dtype=np.float64)
     vertical_rotation = np.column_stack([vertical_x, vertical_y, np.cross(vertical_x, vertical_y)])
 
     place_position = object_position_base + vertical_x * insertion_depth
@@ -177,15 +178,13 @@ def _execute_cycle(
     candidate: dict,
     poses: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...], tuple[float, ...]],
     ready_cfg: dict,
+    open_width_m: float,
 ) -> bool:
-    """执行一轮抓取、返回、竖直放回和再次返回。"""
+    """执行一轮抓取、返回、原位置竖直放置和再次返回。"""
     grasp_pose, pregrasp_pose, place_pose, place_pregrasp_pose = poses
-    jaw_width = float(candidate["jaw_width_m"])
-    if not np.isfinite(jaw_width) or not 0.0 < jaw_width <= GraspDriver.MAX_DISTANCE_M:
-        raise ValueError(f"invalid candidate jaw_width_m={jaw_width}")
-    open_width = float(np.clip(jaw_width + 0.006, 0.0, GraspDriver.MAX_DISTANCE_M))
+    print(f"[真机] 夹爪固定开度={open_width_m * 1000.0:.1f} mm")
 
-    grasp_driver.open_gripper(open_width)
+    grasp_driver.open_gripper(open_width_m)
     _move_pose(controller, pregrasp_pose, 2.0, "pregrasp")
     _move_pose(controller, grasp_pose, 1.5, "grasp")
 
@@ -195,13 +194,13 @@ def _execute_cycle(
     _move_ready(controller, ready_cfg)
     if not grasp_ok:
         print("[Real] empty grasp; skip place")
-        grasp_driver.open_gripper(open_width)
+        grasp_driver.open_gripper(open_width_m)
         return False
 
     _move_pose(controller, place_pregrasp_pose, 2.0, "place_pregrasp")
     _move_pose(controller, place_pose, 1.5, "place")
     print("[Real] release object")
-    grasp_driver.open_gripper(open_width)
+    grasp_driver.open_gripper(open_width_m)
     _move_pose(controller, place_pregrasp_pose, 1.5, "place_retreat")
     _move_ready(controller, ready_cfg)
     return True
@@ -211,6 +210,11 @@ def main() -> int:
     cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
     robot_cfg = cfg["robot"]
     ready_cfg = robot_cfg["ready_pose"]
+    open_width_m = float(cfg["grasp_pipeline"]["grasp"]["gripper_open_width_m"])
+    if not np.isfinite(open_width_m) or not 0.0 < open_width_m <= GraspDriver.MAX_DISTANCE_M:
+        raise ValueError(
+            f"gripper_open_width_m 必须位于 (0, {GraspDriver.MAX_DISTANCE_M}] m"
+        )
     camera_type = str(cfg["camera"]["type"]).lower()
     T_hand_eye, hand_eye_mode = load_hand_eye(GRASP_ROOT, camera_type)
     if T_hand_eye is None or hand_eye_mode != "eye_in_hand":
@@ -232,11 +236,6 @@ def main() -> int:
     print(f"[Safety] model=B601-DM channel={channel}")
     print(f"[Safety] hand-eye={camera_type}/hand_eye.npz mode={hand_eye_mode}")
     print("[Safety] no collision planner: clear the workspace and keep emergency stop ready")
-    if os.environ.get("REBOT_REAL_CONFIRMED") != "1":
-        confirmation = input("Type RUN REAL after checking limits, workspace and E-stop: ").strip()
-        if confirmation != "RUN REAL":
-            print("[Real] cancelled before connecting hardware")
-            return 0
 
     rebotarm: RebotArm | None = None
     controller: RebotArmEndPose | None = None
@@ -267,14 +266,33 @@ def main() -> int:
                 f"conf={float(candidate['confidence']):.2f} "
                 f"camera_xyz={np.round(candidate['position_m'], 4).tolist()}"
             )
-            command = input("Press Enter to execute this cycle, or type q to stop: ").strip().lower()
-            if command == "q":
-                break
-
-            # 操作者确认期间可能产生了更新的稳定候选；优先采用最新一份。
-            candidate = _read_new_candidate(ready_after) or candidate
-            poses = _candidate_to_poses(candidate, grasp_driver, T_hand_eye, cfg)
-            _execute_cycle(controller, grasp_driver, candidate, poses, ready_cfg)
+            try:
+                poses = _candidate_to_poses(
+                    candidate,
+                    grasp_driver,
+                    T_hand_eye,
+                    cfg,
+                )
+                _execute_cycle(
+                    controller,
+                    grasp_driver,
+                    candidate,
+                    poses,
+                    ready_cfg,
+                    open_width_m,
+                )
+            except (MotionPlanningError, ValueError) as exc:
+                # IK/轨迹规划失败不代表串口或控制线程失效。回到腕部相机的
+                # 观测姿态并释放夹爪，丢弃运动期间的旧候选；只有恢复动作本身
+                # 失败时才退出，避免在未知机械状态下继续自动运行。
+                print(f"\n[恢复] 本轮动作未完成：{exc}")
+                print("[恢复] 回到 ready_pose，重新观察并等待下一份稳定候选")
+                _move_ready(controller, ready_cfg)
+                grasp_driver.release_gripper()
+                ready_after = time.time() + READY_STABILIZE_SECONDS
+                continue
+            # 机械臂回到 ready 后等待相机稳定，只接受这个时刻之后的新候选。
+            # 这样不会重复执行移动期间写入的旧结果，也不会把上一轮候选再次抓取。
             ready_after = time.time() + READY_STABILIZE_SECONDS
     finally:
         print("\n[Real] stopping: release gripper, safe home and disconnect")
